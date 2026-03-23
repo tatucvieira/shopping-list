@@ -1,9 +1,10 @@
+import os
 from flask import Flask, render_template, request, redirect, url_for, jsonify, flash
 from models import get_db, init_db
 from delivery_providers import mock as delivery
 
 app = Flask(__name__)
-app.secret_key = "dev-secret-change-in-production"
+app.secret_key = os.environ.get("SECRET_KEY", "dev-secret-change-in-production")
 
 
 @app.before_request
@@ -220,4 +221,5 @@ def order_status(list_id):
 
 if __name__ == "__main__":
     init_db()
-    app.run(debug=True, port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(debug=os.environ.get("FLASK_DEBUG", "0") == "1", host="0.0.0.0", port=port)
