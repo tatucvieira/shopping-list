@@ -11,50 +11,55 @@ jobs:
   setup:
     runs-on: ubuntu-latest
     steps:
-      - name: Test token and list projects
-        id: test
+      - uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Create project, deploy, and generate domain
         run: |
-          echo "=== Testing Railway API token ==="
+          set +e
+          REPORT=""
 
-          # Test token by listing projects
-          PROJECTS=$(curl -s -X POST https://backboard.railway.app/graphql/v2 \
-            -H "Authorization: Bearer $RAILWAY_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d '{"query": "{ me { id email } }"}')
-          echo "Me: $PROJECTS"
+          # Step 1: Init a new project
+          echo "=== Creating project ==="
+          railway init 2>&1 | tee /tmp/init.txt
+          REPORT="$REPORT## Init\n\`\`\`\n$(cat /tmp/init.txt)\n\`\`\`\n\n"
 
-          PROJECT_LIST=$(curl -s -X POST https://backboard.railway.app/graphql/v2 \
-            -H "Authorization: Bearer $RAILWAY_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d '{"query": "{ projects { edges { node { id name services { edges { node { id name } } } } } } }"}')
-          echo "Projects: $PROJECT_LIST"
+          # Step 2: Link and check status
+          echo "=== Status ==="
+          railway status 2>&1 | tee /tmp/status.txt
+          REPORT="$REPORT## Status\n\`\`\`\n$(cat /tmp/status.txt)\n\`\`\`\n\n"
 
-          # Save for issue
-          echo "$PROJECTS" > /tmp/me.txt
-          echo "$PROJECT_LIST" > /tmp/projects.txt
+          # Step 3: Deploy from shopping-list directory
+          echo "=== Deploying ==="
+          cd shopping-list
+          railway up --detach 2>&1 | tee /tmp/deploy.txt
+          DEPLOY_EXIT=$?
+          cd ..
+          REPORT="$REPORT## Deploy (exit=$DEPLOY_EXIT)\n\`\`\`\n$(cat /tmp/deploy.txt)\n\`\`\`\n\n"
+
+          # Step 4: Generate domain
+          echo "=== Generating domain ==="
+          railway domain 2>&1 | tee /tmp/domain.txt
+          REPORT="$REPORT## Domain\n\`\`\`\n$(cat /tmp/domain.txt)\n\`\`\`\n\n"
+
+          # Step 5: Final status
+          echo "=== Final status ==="
+          railway status 2>&1 | tee /tmp/final.txt
+          REPORT="$REPORT## Final Status\n\`\`\`\n$(cat /tmp/final.txt)\n\`\`\`"
+
+          echo -e "$REPORT" > /tmp/report.txt
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
 
       - name: Report results
         if: always()
         run: |
-          ME=$(cat /tmp/me.txt 2>/dev/null || echo "N/A")
-          PROJECTS=$(cat /tmp/projects.txt 2>/dev/null || echo "N/A")
-
+          REPORT=$(cat /tmp/report.txt 2>/dev/null || echo "No report generated")
           gh issue create \
-            --title "Railway API Test - $(date -u +%H:%M)" \
-            --body "$(cat <<BODY
-          ## Token Test (me query)
-          \`\`\`json
-          ${ME}
-          \`\`\`
-
-          ## Projects
-          \`\`\`json
-          ${PROJECTS}
-          \`\`\`
-          BODY
-          )" \
+            --title "Railway Deploy Result - $(date -u +%H:%M)" \
+            --body "$REPORT" \
             --repo ${{ github.repository }}
         env:
           GH_TOKEN: ${{ github.token }}
