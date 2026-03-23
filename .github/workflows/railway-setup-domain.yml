@@ -1,0 +1,47 @@
+name: Setup Railway Domain
+
+on:
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Generate domain and report
+        run: |
+          set +e
+
+          echo "=== Railway Status ==="
+          railway status 2>&1 | tee /tmp/status.txt
+
+          echo "=== Generating domain ==="
+          railway domain 2>&1 | tee /tmp/domain.txt
+
+          echo "=== Final status ==="
+          railway status 2>&1 | tee -a /tmp/status.txt
+
+          STATUS=$(cat /tmp/status.txt)
+          DOMAIN=$(cat /tmp/domain.txt)
+
+          gh issue create \
+            --title "Railway Domain Setup Result" \
+            --body "## Railway Status
+          \`\`\`
+          ${STATUS}
+          \`\`\`
+
+          ## Domain Output
+          \`\`\`
+          ${DOMAIN}
+          \`\`\`" \
+            --repo ${{ github.repository }}
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
