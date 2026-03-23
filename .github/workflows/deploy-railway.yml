@@ -5,6 +5,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  issues: write
+  contents: read
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -15,7 +19,32 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
-      - name: Deploy
-        run: railway up --detach
+      - name: Deploy and capture output
+        id: deploy
+        continue-on-error: true
+        run: |
+          set +e
+          OUTPUT=$(railway up --detach 2>&1)
+          EXIT_CODE=$?
+          echo "$OUTPUT"
+          echo "deploy_output<<EOFDELIM" >> $GITHUB_OUTPUT
+          echo "$OUTPUT" >> $GITHUB_OUTPUT
+          echo "EOFDELIM" >> $GITHUB_OUTPUT
+          echo "exit_code=$EXIT_CODE" >> $GITHUB_OUTPUT
+          exit $EXIT_CODE
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
+      - name: Post deploy result to issue
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const output = `${{ steps.deploy.outputs.deploy_output }}`;
+            const exitCode = `${{ steps.deploy.outputs.exit_code }}`;
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `Deploy failed - ${new Date().toISOString()}`,
+              body: `## Deploy Output\n\n**Exit code:** ${exitCode}\n\n\`\`\`\n${output}\n\`\`\``
+            });
