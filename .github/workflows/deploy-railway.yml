@@ -8,6 +8,8 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -15,7 +17,39 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
-      - name: Deploy
-        run: railway up --detach
-        env:
-          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      - name: Create project if needed
+        run: |
+          # Try to list projects; if no project linked, create one
+          echo "Checking Railway connection..."
+          railway whoami || { echo "Auth failed"; exit 1; }
+
+          # Check if we have a project linked via env
+          if [ -z "$RAILWAY_PROJECT_ID" ]; then
+            echo "No project ID set. Creating new project..."
+            PROJECT_OUTPUT=$(railway project create --name "shopping-list" 2>&1) || true
+            echo "$PROJECT_OUTPUT"
+            # Extract project ID if created
+            PROJECT_ID=$(echo "$PROJECT_OUTPUT" | grep -oP '[a-f0-9-]{36}' | head -1)
+            if [ -n "$PROJECT_ID" ]; then
+              echo "RAILWAY_PROJECT_ID=$PROJECT_ID" >> $GITHUB_ENV
+              echo "Created project: $PROJECT_ID"
+            else
+              echo "Could not create project. Output: $PROJECT_OUTPUT"
+              echo "Trying to link existing project..."
+              railway project list
+            fi
+          fi
+
+      - name: Deploy to Railway
+        run: |
+          echo "Deploying from directory: $(pwd)"
+          echo "Files:"
+          ls -la
+          echo "---"
+          if [ -n "$RAILWAY_PROJECT_ID" ]; then
+            railway link --project "$RAILWAY_PROJECT_ID" || true
+          fi
+          railway up --detach 2>&1 || {
+            echo "Deploy failed. Trying with explicit service..."
+            railway up --detach --service web 2>&1
+          }
