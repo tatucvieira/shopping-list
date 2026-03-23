@@ -1,0 +1,133 @@
+{% extends "base.html" %}
+{% block title %}{{ list['name'] }} - Lista de Compras{% endblock %}
+
+{% block content %}
+<h2>{{ list['name'] }}</h2>
+
+<!-- Add item form -->
+<div class="card">
+    <form action="{{ url_for('add_item', list_id=list['id']) }}" method="post">
+        <div class="form-row">
+            <div class="wide">
+                <label>Item</label>
+                <input type="text" name="name" placeholder="Ex: Arroz, Leite..." required autofocus>
+            </div>
+            <div class="narrow">
+                <label>Qtd</label>
+                <input type="number" name="quantity" value="1" min="0.1" step="0.1">
+            </div>
+            <div class="narrow">
+                <label>Un.</label>
+                <select name="unit">
+                    <option value="un">un</option>
+                    <option value="kg">kg</option>
+                    <option value="L">L</option>
+                    <option value="g">g</option>
+                    <option value="ml">ml</option>
+                    <option value="pct">pct</option>
+                    <option value="cx">cx</option>
+                </select>
+            </div>
+        </div>
+        <div class="form-row">
+            <div>
+                <label>Categoria</label>
+                <select name="category_id">
+                    <option value="">Sem categoria</option>
+                    {% for cat in categories %}
+                    <option value="{{ cat['id'] }}">{{ cat['name'] }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="narrow">
+                <label>Preço est.</label>
+                <input type="number" name="estimated_price" step="0.01" min="0" placeholder="R$">
+            </div>
+            <div>
+                <label>&nbsp;</label>
+                <button type="submit" class="btn btn-primary btn-block">Adicionar</button>
+            </div>
+        </div>
+    </form>
+</div>
+
+<!-- Items -->
+{% if items %}
+    {% set ns = namespace(current_cat='') %}
+    <div class="card">
+        {% for item in items %}
+            {% set cat = item['category_name'] or 'Sem categoria' %}
+            {% if cat != ns.current_cat %}
+                {% set ns.current_cat = cat %}
+                <div class="category-label">{{ cat }}</div>
+            {% endif %}
+
+            <div class="item-row {% if item['checked'] %}checked{% endif %}">
+                <div class="item-check {% if item['checked'] %}done{% endif %}"
+                     onclick="toggleItem({{ item['id'] }})">
+                    {% if item['checked'] %}&#10003;{% endif %}
+                </div>
+                <div class="item-info">
+                    <div class="item-name">{{ item['name'] }}</div>
+                    <div class="item-meta">
+                        {{ item['quantity'] }} {{ item['unit'] }}
+                        {% if item['estimated_price'] %}
+                        &middot; R$ {{ "%.2f"|format(item['estimated_price']) }}
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="item-actions">
+                    <button class="item-delete" onclick="deleteItem({{ item['id'] }})"
+                            title="Remover">&times;</button>
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+
+    <!-- Summary -->
+    {% set total = items | selectattr('estimated_price') | map(attribute='estimated_price') | sum %}
+    {% if total > 0 %}
+    <div class="card">
+        <div style="text-align: right; color: var(--text-muted);">
+            Estimativa: <strong>R$ {{ "%.2f"|format(total) }}</strong>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Order button -->
+    {% if list['status'] == 'draft' %}
+    <a href="{{ url_for('review_order', list_id=list['id']) }}" class="btn btn-primary btn-lg btn-block"
+       style="margin-top: 12px; display: block; text-align: center;">
+        Pedir pelo Delivery
+    </a>
+    {% elif list['status'] == 'ordered' %}
+    <a href="{{ url_for('order_status', list_id=list['id']) }}" class="btn btn-outline btn-lg btn-block"
+       style="margin-top: 12px; display: block; text-align: center;">
+        Ver Status do Pedido
+    </a>
+    {% endif %}
+
+{% else %}
+    <div class="empty-state">
+        <p>Lista vazia. Adicione itens acima!</p>
+    </div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script>
+function toggleItem(id) {
+    fetch('/item/' + id + '/toggle', {
+        method: 'POST',
+        headers: {'X-Requested-With': 'XMLHttpRequest'}
+    }).then(() => location.reload());
+}
+function deleteItem(id) {
+    if (!confirm('Remover este item?')) return;
+    fetch('/item/' + id + '/delete', {
+        method: 'POST',
+        headers: {'X-Requested-With': 'XMLHttpRequest'}
+    }).then(() => location.reload());
+}
+</script>
+{% endblock %}

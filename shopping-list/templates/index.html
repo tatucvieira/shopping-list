@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+
+{% block content %}
+<form action="{{ url_for('create_list') }}" method="post" style="margin-bottom: 20px;">
+    <div class="form-row">
+        <div class="wide">
+            <input type="text" name="name" placeholder="Nome da lista (ex: Compras da semana)">
+        </div>
+        <div>
+            <button type="submit" class="btn btn-primary btn-block">Nova Lista</button>
+        </div>
+    </div>
+</form>
+
+{% if lists %}
+    {% for list in lists %}
+    <div class="card">
+        <div class="list-card">
+            <div class="list-card-info">
+                <h3><a href="{{ url_for('edit_list', list_id=list['id']) }}">{{ list['name'] }}</a></h3>
+                <p>
+                    <span class="badge badge-{{ list['status'] }}">{{ list['status'] }}</span>
+                    &middot; {{ list['created_at'][:10] }}
+                </p>
+            </div>
+            <form action="{{ url_for('delete_list', list_id=list['id']) }}" method="post"
+                  onsubmit="return confirm('Excluir esta lista?')">
+                <button type="submit" class="btn btn-sm btn-outline" style="color: var(--danger);">Excluir</button>
+            </form>
+        </div>
+    </div>
+    {% endfor %}
+{% else %}
+    <div class="empty-state">
+        <p>Nenhuma lista ainda. Crie uma acima!</p>
+    </div>
+{% endif %}
+{% endblock %}

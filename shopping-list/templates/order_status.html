@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Status do Pedido - {{ list['name'] }}{% endblock %}
+
+{% block content %}
+<h2>Status do Pedido</h2>
+
+{% if order and 'error' not in order %}
+<div class="card">
+    <p><strong>Pedido:</strong> {{ order['order_id'] }}</p>
+    <p><strong>Status:</strong> <span class="badge badge-ordered">{{ order['status'] }}</span></p>
+    <p><strong>Realizado em:</strong> {{ order['placed_at'] }}</p>
+    <p><strong>Entrega estimada:</strong> {{ order['estimated_delivery'] }}</p>
+    <p><strong>Provedor:</strong> {{ order['cart']['provider'] }}</p>
+
+    <h3 style="margin-top: 16px;">Itens</h3>
+    <div class="order-summary">
+        {% for item in order['cart']['items'] %}
+        <div class="order-line">
+            <div>{{ item['name'] }} &times; {{ item['quantity'] }}</div>
+            <div>R$ {{ "%.2f"|format(item['subtotal']) }}</div>
+        </div>
+        {% endfor %}
+        <div class="order-line order-total">
+            <div>Total</div>
+            <div>R$ {{ "%.2f"|format(order['cart']['total']) }}</div>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="card">
+    <p>Informações do pedido não disponíveis.</p>
+</div>
+{% endif %}
+
+{% if history %}
+<h3 style="margin-top: 20px;">Histórico</h3>
+{% for entry in history %}
+<div class="card">
+    <p><strong>{{ entry['status'] }}</strong> &middot; {{ entry['created_at'] }}</p>
+    {% if entry['details'] %}
+    <p style="color: var(--text-muted); font-size: 0.85rem;">{{ entry['details'] }}</p>
+    {% endif %}
+</div>
+{% endfor %}
+{% endif %}
+
+<a href="{{ url_for('index') }}" class="btn btn-outline btn-block" style="margin-top: 16px; display: block; text-align: center;">
+    Voltar para Listas
+</a>
+{% endblock %}

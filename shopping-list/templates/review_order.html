@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Revisar Pedido - {{ list['name'] }}{% endblock %}
+
+{% block content %}
+<h2>Revisar Pedido</h2>
+<p style="color: var(--text-muted); margin-bottom: 16px;">
+    Confira os itens e valores antes de confirmar o pedido via <strong>{{ cart['provider'] }}</strong>.
+</p>
+
+<div class="card">
+    <div class="order-summary">
+        {% for item in cart['items'] %}
+        <div class="order-line">
+            <div>
+                <strong>{{ item['name'] }}</strong>
+                <span style="color: var(--text-muted);">&times; {{ item['quantity'] }}</span>
+                {% if not item['available'] %}
+                <span style="color: var(--danger); font-size: 0.8rem;">(indisponível)</span>
+                {% endif %}
+            </div>
+            <div>R$ {{ "%.2f"|format(item['subtotal']) }}</div>
+        </div>
+        {% endfor %}
+
+        <div class="order-line">
+            <div>Subtotal</div>
+            <div>R$ {{ "%.2f"|format(cart['subtotal']) }}</div>
+        </div>
+        <div class="order-line">
+            <div>Taxa de entrega</div>
+            <div>R$ {{ "%.2f"|format(cart['delivery_fee']) }}</div>
+        </div>
+        <div class="order-line order-total">
+            <div>Total</div>
+            <div>R$ {{ "%.2f"|format(cart['total']) }}</div>
+        </div>
+    </div>
+
+    <p style="margin-top: 12px; font-size: 0.85rem; color: var(--text-muted);">
+        Entrega estimada: {{ cart['estimated_delivery'] }}
+    </p>
+</div>
+
+<div class="order-actions">
+    <a href="{{ url_for('edit_list', list_id=list['id']) }}" class="btn btn-outline btn-lg" style="text-align: center;">
+        Voltar e Editar
+    </a>
+    <form action="{{ url_for('confirm_order', list_id=list['id']) }}" method="post" style="flex: 1;">
+        <input type="hidden" name="cart_id" value="{{ cart['cart_id'] }}">
+        <button type="submit" class="btn btn-primary btn-lg btn-block">
+            Confirmar Pedido
+        </button>
+    </form>
+</div>
+{% endblock %}
