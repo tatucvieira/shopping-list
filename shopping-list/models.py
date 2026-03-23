@@ -1,5 +1,6 @@
 import sqlite3
 import os
+import uuid
 from datetime import datetime
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "shopping.db")
@@ -10,6 +11,10 @@ def get_db():
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
+
+
+def generate_share_token():
+    return uuid.uuid4().hex[:12]
 
 
 def init_db():
@@ -38,6 +43,7 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
             status TEXT NOT NULL DEFAULT 'draft',
+            share_token TEXT,
             created_at TEXT NOT NULL DEFAULT (datetime('now')),
             ordered_at TEXT,
             delivery_provider TEXT,
@@ -53,6 +59,12 @@ def init_db():
             FOREIGN KEY (list_id) REFERENCES shopping_lists(id)
         );
     """)
+
+    # Add share_token column if missing (migration for existing DBs)
+    try:
+        conn.execute("SELECT share_token FROM shopping_lists LIMIT 1")
+    except sqlite3.OperationalError:
+        conn.execute("ALTER TABLE shopping_lists ADD COLUMN share_token TEXT")
 
     default_categories = [
         "Frutas e Verduras", "Carnes e Frios", "Laticínios",

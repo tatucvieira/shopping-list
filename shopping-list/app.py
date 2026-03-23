@@ -1,6 +1,6 @@
 import os
 from flask import Flask, render_template, request, redirect, url_for, jsonify, flash
-from models import get_db, init_db
+from models import get_db, init_db, generate_share_token
 from delivery_providers import mock as delivery
 
 app = Flask(__name__)
@@ -31,7 +31,11 @@ def create_list():
     if not name:
         name = "Minha Lista"
     db = get_db()
-    db.execute("INSERT INTO shopping_lists (name) VALUES (?)", (name,))
+    token = generate_share_token()
+    db.execute(
+        "INSERT INTO shopping_lists (name, share_token) VALUES (?, ?)",
+        (name, token),
+    )
     db.commit()
     list_id = db.execute("SELECT last_insert_rowid()").fetchone()[0]
     db.close()
@@ -65,6 +69,65 @@ def edit_list(list_id):
     )
 
 
+# --- Shared list (read-only by default, editable via token) ---
+
+
+@app.route("/s/<token>")
+def shared_list(token):
+    db = get_db()
+    shopping_list = db.execute(
+        "SELECT * FROM shopping_lists WHERE share_token = ?", (token,)
+    ).fetchone()
+    if not shopping_list:
+        flash("Lista não encontrada", "error")
+        return redirect(url_for("index"))
+
+    items = db.execute(
+        """SELECT i.*, c.name as category_name
+           FROM items i
+           LEFT JOIN categories c ON i.category_id = c.id
+           WHERE i.list_id = ?
+           ORDER BY c.name, i.name""",
+        (shopping_list["id"],),
+    ).fetchall()
+    categories = db.execute(
+        "SELECT * FROM categories ORDER BY name"
+    ).fetchall()
+    db.close()
+    return render_template(
+        "list.html",
+        list=shopping_list,
+        items=items,
+        categories=categories,
+        shared=True,
+    )
+
+
+@app.route("/list/<int:list_id>/share", methods=["POST"])
+def generate_share_link(list_id):
+    db = get_db()
+    row = db.execute(
+        "SELECT share_token FROM shopping_lists WHERE id = ?", (list_id,)
+    ).fetchone()
+    if not row:
+        db.close()
+        return jsonify({"error": "Lista não encontrada"}), 404
+    token = row["share_token"]
+    if not token:
+        token = generate_share_token()
+        db.execute(
+            "UPDATE shopping_lists SET share_token = ? WHERE id = ?",
+            (token, list_id),
+        )
+        db.commit()
+    db.close()
+    share_url = url_for("shared_list", token=token, _external=True)
+    return jsonify({"url": share_url, "token": token})
+
+
+# --- Item CRUD ---
+
+
 @app.route("/list/<int:list_id>/item", methods=["POST"])
 def add_item(list_id):
     name = request.form.get("name", "").strip()
@@ -87,6 +150,57 @@ def add_item(list_id):
     db.commit()
     db.close()
     return redirect(url_for("edit_list", list_id=list_id))
+
+
+@app.route("/item/<int:item_id>/update", methods=["POST"])
+def update_item(item_id):
+    db = get_db()
+    item = db.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+    if not item:
+        db.close()
+        return jsonify({"error": "Item não encontrado"}), 404
+
+    data = request.get_json() if request.is_json else request.form
+    name = data.get("name", item["name"])
+    quantity = float(data.get("quantity", item["quantity"]))
+    unit = data.get("unit", item["unit"])
+    category_id = data.get("category_id") or item["category_id"]
+    estimated_price = data.get("estimated_price")
+    if estimated_price is not None and estimated_price != "":
+        estimated_price = float(estimated_price)
+    else:
+        estimated_price = item["estimated_price"]
+
+    db.execute(
+        """UPDATE items SET name=?, quantity=?, unit=?, category_id=?, estimated_price=?
+           WHERE id=?""",
+        (name, quantity, unit, category_id, estimated_price, item_id),
+    )
+    db.commit()
+    db.close()
+
+    if request.is_json:
+        return jsonify({"ok": True})
+    return redirect(url_for("edit_list", list_id=item["list_id"]))
+
+
+@app.route("/item/<int:item_id>/quantity", methods=["POST"])
+def update_quantity(item_id):
+    """Inline quantity adjustment (+/-)."""
+    db = get_db()
+    item = db.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+    if not item:
+        db.close()
+        return jsonify({"error": "Item não encontrado"}), 404
+
+    data = request.get_json() or {}
+    delta = float(data.get("delta", 0))
+    new_qty = max(0.1, item["quantity"] + delta)
+
+    db.execute("UPDATE items SET quantity = ? WHERE id = ?", (new_qty, item_id))
+    db.commit()
+    db.close()
+    return jsonify({"ok": True, "quantity": new_qty})
 
 
 @app.route("/item/<int:item_id>/toggle", methods=["POST"])
@@ -134,7 +248,6 @@ def delete_list(list_id):
 
 @app.route("/list/<int:list_id>/order")
 def review_order(list_id):
-    """Prepare order for review before sending to delivery."""
     db = get_db()
     shopping_list = db.execute(
         "SELECT * FROM shopping_lists WHERE id = ?", (list_id,)
@@ -153,7 +266,6 @@ def review_order(list_id):
         flash("Adicione itens à lista antes de pedir.", "warning")
         return redirect(url_for("edit_list", list_id=list_id))
 
-    # Create cart in delivery provider
     cart_items = [{"name": item["name"], "quantity": item["quantity"]} for item in items]
     cart = delivery.create_cart(cart_items)
 
@@ -164,7 +276,6 @@ def review_order(list_id):
 
 @app.route("/list/<int:list_id>/confirm", methods=["POST"])
 def confirm_order(list_id):
-    """User confirmed — place the order."""
     cart_id = request.form.get("cart_id")
     if not cart_id:
         flash("Carrinho inválido", "error")
@@ -176,7 +287,6 @@ def confirm_order(list_id):
         flash(order["error"], "error")
         return redirect(url_for("edit_list", list_id=list_id))
 
-    # Update list status
     db = get_db()
     db.execute(
         """UPDATE shopping_lists

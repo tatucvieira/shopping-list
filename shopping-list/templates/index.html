@@ -23,10 +23,15 @@
                     &middot; {{ list['created_at'][:10] }}
                 </p>
             </div>
-            <form action="{{ url_for('delete_list', list_id=list['id']) }}" method="post"
-                  onsubmit="return confirm('Excluir esta lista?')">
-                <button type="submit" class="btn btn-sm btn-outline" style="color: var(--danger);">Excluir</button>
-            </form>
+            <div class="list-card-actions">
+                <button class="btn btn-sm btn-outline" onclick="shareList({{ list['id'] }})" title="Compartilhar">
+                    &#x1F517;
+                </button>
+                <form action="{{ url_for('delete_list', list_id=list['id']) }}" method="post"
+                      onsubmit="return confirm('Excluir esta lista?')" style="display:inline;">
+                    <button type="submit" class="btn btn-sm btn-outline" style="color: var(--danger);">Excluir</button>
+                </form>
+            </div>
         </div>
     </div>
     {% endfor %}
@@ -35,4 +40,43 @@
         <p>Nenhuma lista ainda. Crie uma acima!</p>
     </div>
 {% endif %}
+
+<!-- Share modal -->
+<div id="share-modal" class="modal" style="display:none;">
+    <div class="modal-content card">
+        <h3>Compartilhar Lista</h3>
+        <p style="margin: 12px 0; color: var(--text-muted); font-size: 0.9rem;">
+            Qualquer pessoa com o link pode ver e editar a lista.
+        </p>
+        <input type="text" id="share-url" readonly style="margin-bottom: 12px;">
+        <div class="form-row">
+            <button class="btn btn-primary btn-block" onclick="copyShareLink()">Copiar Link</button>
+            <button class="btn btn-outline btn-block" onclick="closeShareModal()">Fechar</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function shareList(listId) {
+    fetch('/list/' + listId + '/share', {method: 'POST'})
+        .then(r => r.json())
+        .then(data => {
+            document.getElementById('share-url').value = data.url;
+            document.getElementById('share-modal').style.display = 'flex';
+        });
+}
+function copyShareLink() {
+    var input = document.getElementById('share-url');
+    input.select();
+    navigator.clipboard.writeText(input.value).then(function() {
+        input.style.borderColor = 'var(--primary)';
+        setTimeout(function() { input.style.borderColor = ''; }, 1000);
+    });
+}
+function closeShareModal() {
+    document.getElementById('share-modal').style.display = 'none';
+}
+</script>
 {% endblock %}

@@ -2,7 +2,12 @@
 {% block title %}{{ list['name'] }} - Lista de Compras{% endblock %}
 
 {% block content %}
-<h2>{{ list['name'] }}</h2>
+<div class="list-header">
+    <h2>{{ list['name'] }}</h2>
+    {% if not shared %}
+    <button class="btn btn-sm btn-outline" onclick="shareThisList()" title="Compartilhar">&#x1F517; Compartilhar</button>
+    {% endif %}
+</div>
 
 <!-- Add item form -->
 <div class="card">
@@ -53,21 +58,30 @@
 
 <!-- Items -->
 {% if items %}
-    {% set ns = namespace(current_cat='') %}
+    {% set ns = namespace(current_cat='', cat_total=0.0) %}
     <div class="card">
         {% for item in items %}
             {% set cat = item['category_name'] or 'Sem categoria' %}
             {% if cat != ns.current_cat %}
+                {% if ns.current_cat and ns.cat_total > 0 %}
+                <div class="category-subtotal">
+                    Subtotal: R$ {{ "%.2f"|format(ns.cat_total) }}
+                </div>
+                {% endif %}
                 {% set ns.current_cat = cat %}
+                {% set ns.cat_total = 0.0 %}
                 <div class="category-label">{{ cat }}</div>
             {% endif %}
+            {% if item['estimated_price'] %}
+                {% set ns.cat_total = ns.cat_total + (item['estimated_price'] * item['quantity']) %}
+            {% endif %}
 
-            <div class="item-row {% if item['checked'] %}checked{% endif %}">
+            <div class="item-row {% if item['checked'] %}checked{% endif %}" id="item-{{ item['id'] }}">
                 <div class="item-check {% if item['checked'] %}done{% endif %}"
                      onclick="toggleItem({{ item['id'] }})">
                     {% if item['checked'] %}&#10003;{% endif %}
                 </div>
-                <div class="item-info">
+                <div class="item-info" onclick="startEdit({{ item['id'] }})">
                     <div class="item-name">{{ item['name'] }}</div>
                     <div class="item-meta">
                         {{ item['quantity'] }} {{ item['unit'] }}
@@ -76,20 +90,37 @@
                         {% endif %}
                     </div>
                 </div>
+                <div class="item-qty-controls">
+                    <button class="qty-btn" onclick="adjustQty({{ item['id'] }}, -1)">-</button>
+                    <span class="qty-display" id="qty-{{ item['id'] }}">{{ item['quantity'] }}</span>
+                    <button class="qty-btn" onclick="adjustQty({{ item['id'] }}, 1)">+</button>
+                </div>
                 <div class="item-actions">
                     <button class="item-delete" onclick="deleteItem({{ item['id'] }})"
                             title="Remover">&times;</button>
                 </div>
             </div>
         {% endfor %}
+        {% if ns.cat_total > 0 %}
+        <div class="category-subtotal">
+            Subtotal: R$ {{ "%.2f"|format(ns.cat_total) }}
+        </div>
+        {% endif %}
     </div>
 
     <!-- Summary -->
-    {% set total = items | selectattr('estimated_price') | map(attribute='estimated_price') | sum %}
-    {% if total > 0 %}
-    <div class="card">
-        <div style="text-align: right; color: var(--text-muted);">
-            Estimativa: <strong>R$ {{ "%.2f"|format(total) }}</strong>
+    {% set total = [] %}
+    {% for item in items %}
+        {% if item['estimated_price'] %}
+            {% if total.append(item['estimated_price'] * item['quantity']) %}{% endif %}
+        {% endif %}
+    {% endfor %}
+    {% set grand_total = total | sum %}
+    {% if grand_total > 0 %}
+    <div class="card summary-card">
+        <div class="summary-row">
+            <span>{{ items | length }} itens</span>
+            <span>Estimativa: <strong>R$ {{ "%.2f"|format(grand_total) }}</strong></span>
         </div>
     </div>
     {% endif %}
@@ -112,6 +143,50 @@
         <p>Lista vazia. Adicione itens acima!</p>
     </div>
 {% endif %}
+
+<!-- Edit modal -->
+<div id="edit-modal" class="modal" style="display:none;">
+    <div class="modal-content card">
+        <h3>Editar Item</h3>
+        <form id="edit-form" method="post">
+            <div class="form-row" style="flex-direction: column; gap: 10px;">
+                <div>
+                    <label>Nome</label>
+                    <input type="text" id="edit-name" name="name" required>
+                </div>
+                <div class="form-row">
+                    <div>
+                        <label>Qtd</label>
+                        <input type="number" id="edit-qty" name="quantity" min="0.1" step="0.1">
+                    </div>
+                    <div>
+                        <label>Un.</label>
+                        <select id="edit-unit" name="unit">
+                            <option value="un">un</option>
+                            <option value="kg">kg</option>
+                            <option value="L">L</option>
+                            <option value="g">g</option>
+                            <option value="ml">ml</option>
+                            <option value="pct">pct</option>
+                            <option value="cx">cx</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label>Preço</label>
+                        <input type="number" id="edit-price" name="estimated_price" step="0.01" min="0">
+                    </div>
+                </div>
+            </div>
+            <div class="form-row" style="margin-top: 12px;">
+                <button type="submit" class="btn btn-primary btn-block">Salvar</button>
+                <button type="button" class="btn btn-outline btn-block" onclick="closeEditModal()">Cancelar</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- Share toast -->
+<div id="share-toast" class="toast" style="display:none;">Link copiado!</div>
 {% endblock %}
 
 {% block scripts %}
@@ -120,14 +195,62 @@ function toggleItem(id) {
     fetch('/item/' + id + '/toggle', {
         method: 'POST',
         headers: {'X-Requested-With': 'XMLHttpRequest'}
-    }).then(() => location.reload());
+    }).then(function() { location.reload(); });
 }
+
 function deleteItem(id) {
     if (!confirm('Remover este item?')) return;
     fetch('/item/' + id + '/delete', {
         method: 'POST',
         headers: {'X-Requested-With': 'XMLHttpRequest'}
-    }).then(() => location.reload());
+    }).then(function() { location.reload(); });
+}
+
+function adjustQty(id, delta) {
+    fetch('/item/' + id + '/quantity', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({delta: delta})
+    }).then(function(r) { return r.json(); })
+    .then(function(data) {
+        if (data.ok) {
+            document.getElementById('qty-' + id).textContent = data.quantity;
+        }
+    });
+}
+
+var editingId = null;
+function startEdit(id) {
+    editingId = id;
+    var row = document.getElementById('item-' + id);
+    var name = row.querySelector('.item-name').textContent.trim();
+    var meta = row.querySelector('.item-meta').textContent.trim();
+    document.getElementById('edit-name').value = name;
+    // parse qty from meta
+    var parts = meta.split(' ');
+    document.getElementById('edit-qty').value = parts[0] || 1;
+    document.getElementById('edit-unit').value = parts[1] || 'un';
+    // parse price
+    var priceMatch = meta.match(/R\$\s*([\d.,]+)/);
+    document.getElementById('edit-price').value = priceMatch ? priceMatch[1].replace(',', '.') : '';
+    document.getElementById('edit-form').action = '/item/' + id + '/update';
+    document.getElementById('edit-modal').style.display = 'flex';
+}
+
+function closeEditModal() {
+    document.getElementById('edit-modal').style.display = 'none';
+}
+
+function shareThisList() {
+    fetch('/list/{{ list["id"] }}/share', {method: 'POST'})
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+            navigator.clipboard.writeText(data.url).then(function() {
+                var toast = document.getElementById('share-toast');
+                toast.style.display = 'block';
+                setTimeout(function() { toast.style.display = 'none'; }, 2000);
+            });
+        });
 }
 </script>
 {% endblock %}
