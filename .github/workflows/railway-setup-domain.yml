@@ -13,41 +13,75 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Railway CLI
-        run: npm install -g @railway/cli
-
-      - name: Create project, deploy, and generate domain
+      - name: Setup via Railway GraphQL API
         run: |
-          set +e
+          API="https://backboard.railway.app/graphql/v2"
+          TOKEN="$RAILWAY_TOKEN"
           REPORT=""
 
-          # Step 1: Init a new project
+          gql() {
+            curl -s -X POST "$API" \
+              -H "Authorization: Bearer $TOKEN" \
+              -H "Content-Type: application/json" \
+              -d "{\"query\": \"$1\"}"
+          }
+
+          # Step 1: Check existing projects
+          echo "=== Checking projects ==="
+          PROJECTS=$(gql "{ projects { edges { node { id name services { edges { node { id name } } } } } } }")
+          echo "$PROJECTS"
+          REPORT="## Existing Projects\n\`\`\`json\n$PROJECTS\n\`\`\`\n\n"
+
+          # Step 2: Create project
           echo "=== Creating project ==="
-          railway init 2>&1 | tee /tmp/init.txt
-          REPORT="$REPORT## Init\n\`\`\`\n$(cat /tmp/init.txt)\n\`\`\`\n\n"
+          CREATE=$(gql "mutation { projectCreate(input: { name: \\\"shopping-list\\\" }) { id name } }")
+          echo "$CREATE"
+          PROJECT_ID=$(echo "$CREATE" | jq -r '.data.projectCreate.id // empty')
+          REPORT="$REPORT## Create Project\n\`\`\`json\n$CREATE\n\`\`\`\nProject ID: $PROJECT_ID\n\n"
 
-          # Step 2: Link and check status
-          echo "=== Status ==="
-          railway status 2>&1 | tee /tmp/status.txt
-          REPORT="$REPORT## Status\n\`\`\`\n$(cat /tmp/status.txt)\n\`\`\`\n\n"
+          if [ -z "$PROJECT_ID" ]; then
+            echo "Failed to create project"
+            REPORT="$REPORT## ERROR: Could not create project\n"
+            echo -e "$REPORT" > /tmp/report.txt
+            exit 0
+          fi
 
-          # Step 3: Deploy from shopping-list directory
-          echo "=== Deploying ==="
-          cd shopping-list
-          railway up --detach 2>&1 | tee /tmp/deploy.txt
-          DEPLOY_EXIT=$?
-          cd ..
-          REPORT="$REPORT## Deploy (exit=$DEPLOY_EXIT)\n\`\`\`\n$(cat /tmp/deploy.txt)\n\`\`\`\n\n"
+          # Step 3: Get default environment ID
+          echo "=== Getting environment ==="
+          ENV=$(gql "{ project(id: \\\"$PROJECT_ID\\\") { environments { edges { node { id name } } } } }")
+          echo "$ENV"
+          ENV_ID=$(echo "$ENV" | jq -r '.data.project.environments.edges[0].node.id // empty')
+          REPORT="$REPORT## Environment\n\`\`\`json\n$ENV\n\`\`\`\nEnv ID: $ENV_ID\n\n"
 
-          # Step 4: Generate domain
+          # Step 4: Create service with GitHub repo
+          echo "=== Creating service ==="
+          SERVICE=$(gql "mutation { serviceCreate(input: { name: \\\"web\\\", projectId: \\\"$PROJECT_ID\\\", source: { repo: \\\"tatucvieira/shopping-list\\\" } }) { id name } }")
+          echo "$SERVICE"
+          SERVICE_ID=$(echo "$SERVICE" | jq -r '.data.serviceCreate.id // empty')
+          REPORT="$REPORT## Create Service\n\`\`\`json\n$SERVICE\n\`\`\`\nService ID: $SERVICE_ID\n\n"
+
+          if [ -z "$SERVICE_ID" ]; then
+            echo "Failed to create service"
+            echo -e "$REPORT" > /tmp/report.txt
+            exit 0
+          fi
+
+          # Step 5: Set root directory to shopping-list
+          echo "=== Setting variables ==="
+          VARS=$(gql "mutation { variableUpsert(input: { projectId: \\\"$PROJECT_ID\\\", environmentId: \\\"$ENV_ID\\\", serviceId: \\\"$SERVICE_ID\\\", name: \\\"RAILWAY_ROOT_DIRECTORY\\\", value: \\\"shopping-list\\\" }) }")
+          echo "$VARS"
+
+          # Set PORT
+          PORT_VAR=$(gql "mutation { variableUpsert(input: { projectId: \\\"$PROJECT_ID\\\", environmentId: \\\"$ENV_ID\\\", serviceId: \\\"$SERVICE_ID\\\", name: \\\"PORT\\\", value: \\\"8080\\\" }) }")
+          echo "$PORT_VAR"
+          REPORT="$REPORT## Variables\n\`\`\`json\nRoot dir: $VARS\nPort: $PORT_VAR\n\`\`\`\n\n"
+
+          # Step 6: Generate domain
           echo "=== Generating domain ==="
-          railway domain 2>&1 | tee /tmp/domain.txt
-          REPORT="$REPORT## Domain\n\`\`\`\n$(cat /tmp/domain.txt)\n\`\`\`\n\n"
-
-          # Step 5: Final status
-          echo "=== Final status ==="
-          railway status 2>&1 | tee /tmp/final.txt
-          REPORT="$REPORT## Final Status\n\`\`\`\n$(cat /tmp/final.txt)\n\`\`\`"
+          DOMAIN=$(gql "mutation { serviceDomainCreate(input: { serviceId: \\\"$SERVICE_ID\\\", environmentId: \\\"$ENV_ID\\\" }) { domain } }")
+          echo "$DOMAIN"
+          DOMAIN_URL=$(echo "$DOMAIN" | jq -r '.data.serviceDomainCreate.domain // empty')
+          REPORT="$REPORT## Domain\n\`\`\`json\n$DOMAIN\n\`\`\`\n\n**URL: https://$DOMAIN_URL**\n"
 
           echo -e "$REPORT" > /tmp/report.txt
         env:
