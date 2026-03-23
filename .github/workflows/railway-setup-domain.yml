@@ -11,37 +11,50 @@ jobs:
   setup:
     runs-on: ubuntu-latest
     steps:
-      - name: Install Railway CLI
-        run: npm install -g @railway/cli
-
-      - name: Generate domain and report
+      - name: Test token and list projects
+        id: test
         run: |
-          set +e
+          echo "=== Testing Railway API token ==="
 
-          echo "=== Railway Status ==="
-          railway status 2>&1 | tee /tmp/status.txt
+          # Test token by listing projects
+          PROJECTS=$(curl -s -X POST https://backboard.railway.app/graphql/v2 \
+            -H "Authorization: Bearer $RAILWAY_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"query": "{ me { id email } }"}')
+          echo "Me: $PROJECTS"
 
-          echo "=== Generating domain ==="
-          railway domain 2>&1 | tee /tmp/domain.txt
+          PROJECT_LIST=$(curl -s -X POST https://backboard.railway.app/graphql/v2 \
+            -H "Authorization: Bearer $RAILWAY_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"query": "{ projects { edges { node { id name services { edges { node { id name } } } } } } }"}')
+          echo "Projects: $PROJECT_LIST"
 
-          echo "=== Final status ==="
-          railway status 2>&1 | tee -a /tmp/status.txt
-
-          STATUS=$(cat /tmp/status.txt)
-          DOMAIN=$(cat /tmp/domain.txt)
-
-          gh issue create \
-            --title "Railway Domain Setup Result" \
-            --body "## Railway Status
-          \`\`\`
-          ${STATUS}
-          \`\`\`
-
-          ## Domain Output
-          \`\`\`
-          ${DOMAIN}
-          \`\`\`" \
-            --repo ${{ github.repository }}
+          # Save for issue
+          echo "$PROJECTS" > /tmp/me.txt
+          echo "$PROJECT_LIST" > /tmp/projects.txt
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
+      - name: Report results
+        if: always()
+        run: |
+          ME=$(cat /tmp/me.txt 2>/dev/null || echo "N/A")
+          PROJECTS=$(cat /tmp/projects.txt 2>/dev/null || echo "N/A")
+
+          gh issue create \
+            --title "Railway API Test - $(date -u +%H:%M)" \
+            --body "$(cat <<BODY
+          ## Token Test (me query)
+          \`\`\`json
+          ${ME}
+          \`\`\`
+
+          ## Projects
+          \`\`\`json
+          ${PROJECTS}
+          \`\`\`
+          BODY
+          )" \
+            --repo ${{ github.repository }}
+        env:
           GH_TOKEN: ${{ github.token }}
