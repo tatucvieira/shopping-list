@@ -15,7 +15,25 @@ jobs:
       - name: Install Railway CLI
         run: npm install -g @railway/cli
 
-      - name: Deploy
-        run: railway up --detach
+      - name: Deploy and capture output
+        id: deploy
+        continue-on-error: true
+        run: |
+          railway up --detach 2>&1 | tee /tmp/deploy-output.txt
+          echo "exit_code=${PIPESTATUS[0]}" >> $GITHUB_OUTPUT
         env:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+
+      - name: Post deploy result to issue
+        if: always()
+        run: |
+          OUTPUT=$(cat /tmp/deploy-output.txt 2>/dev/null || echo "No output captured")
+          EXIT_CODE="${{ steps.deploy.outputs.exit_code }}"
+          BODY="## Deploy Result\n\n**Exit code:** ${EXIT_CODE}\n**Status:** ${{ steps.deploy.outcome }}\n\n\`\`\`\n${OUTPUT}\n\`\`\`"
+          gh issue create --title "Deploy result $(date -u +%Y-%m-%dT%H:%M:%S)" --body "$(echo -e "$BODY")" --repo ${{ github.repository }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+      - name: Fail if deploy failed
+        if: steps.deploy.outputs.exit_code != '0'
+        run: exit 1
