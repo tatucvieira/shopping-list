@@ -1,83 +1,3 @@
-# Deploy to Railway
-
-You are a deployment assistant. Deploy the current project (or a subdirectory) to Railway.
-
-## How it works
-
-This environment has NO direct internet access. All Railway API calls run via **GitHub Actions**, which has access to the `RAILWAY_TOKEN` stored as a GitHub Secret.
-
-The workflow `.github/workflows/railway-deploy-action.yml` does the actual work. You trigger it, wait for results, and report back.
-
-## Input: $ARGUMENTS
-
-The user may provide arguments like:
-- Project name (default: current repo name)
-- Subdirectory to deploy (default: repo root)
-- Example: `/deploy-railway shopping-list shopping-list/` → project name "shopping-list", root dir "shopping-list"
-
-Parse the arguments: first word = project name, second word = root directory (optional).
-
-## Prerequisites
-
-1. `RAILWAY_TOKEN` must exist as a GitHub Secret in the repo
-2. If not, tell the user:
-   > Add your Railway token as a GitHub Secret:
-   > 1. Go to your repo → Settings → Secrets and variables → Actions
-   > 2. Add secret named `RAILWAY_TOKEN` with your token from https://railway.com/account/tokens
-
-## Deployment Steps
-
-### Step 1: Detect the GitHub repo
-```bash
-git remote -v  # find OWNER/REPO
-```
-
-### Step 2: Trigger the deploy workflow
-```bash
-gh workflow run "Railway Deploy" \
-  --repo OWNER/REPO \
-  -f project_name="PROJECT_NAME" \
-  -f root_directory="ROOT_DIR" \
-  -f github_repo="OWNER/REPO"
-```
-
-### Step 3: Wait for completion
-Poll the workflow run status:
-```bash
-# Get the latest run ID
-gh run list --repo OWNER/REPO --workflow "railway-deploy-action.yml" --limit 1 --json databaseId,status
-
-# Wait for it
-gh run watch RUN_ID --repo OWNER/REPO
-```
-
-### Step 4: Read the result
-The workflow creates a GitHub Issue with the full report. Read the latest issue:
-```bash
-gh api repos/OWNER/REPO/issues --jq '.[0] | {title, body}'
-```
-
-### Step 5: Report to user
-Parse the issue body and present a clean summary:
-```
-Railway Deploy Complete
-   Project:  PROJECT_NAME
-   Domain:   https://DOMAIN
-   Status:   Building from GitHub repo
-```
-
-## Error Handling
-
-- If workflow fails, read the logs: `gh run view RUN_ID --repo OWNER/REPO --log`
-- If "RAILWAY_TOKEN" secret is missing, guide user to add it
-- If project name conflicts, suggest a different name
-- If `railway-deploy-action.yml` doesn't exist, create it (see template below)
-
-## Workflow Template
-
-If `.github/workflows/railway-deploy-action.yml` doesn't exist, create it with this content:
-
-```yaml
 name: Railway Deploy
 
 on:
@@ -172,8 +92,7 @@ jobs:
           if [ -n "$DOMAIN_URL" ]; then
             REPORT="$REPORT## Domain\nhttps://$DOMAIN_URL\n"
           else
-            # Maybe domain already exists
-            REPORT="$REPORT## Domain\nAlready exists or failed: $DOMAIN\n"
+            REPORT="$REPORT## Domain\nAlready exists or failed:\n\`\`\`json\n$DOMAIN\n\`\`\`\n"
           fi
 
           echo -e "$REPORT" > /tmp/report.txt
@@ -190,10 +109,3 @@ jobs:
             --repo ${{ github.repository }}
         env:
           GH_TOKEN: ${{ github.token }}
-```
-
-## Important Notes
-
-- NEVER ask the user to paste tokens in chat — always use GitHub Secrets
-- The workflow creates an issue with results so we can read them
-- Railway auto-deploys on push once the service is connected to the repo
